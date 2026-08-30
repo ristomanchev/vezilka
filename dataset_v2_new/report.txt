@@ -1,0 +1,14 @@
+Macedonian STT dataset - build report
+============================================
+videos processed              : 58
+GOLD  clips (whisper+OCR agree): 255   ~19.2 min
+SILVER clips (whisper only)    : 409   ~23.0 min
+rejected segments             : 73
+
+gold  train/test : 226 / 29
+whisper model    : large-v3
+agreement thresh : 58
+
+Reject reasons:
+     69  too short
+      4  low whisper confidence

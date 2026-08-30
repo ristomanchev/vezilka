@@ -1,0 +1,17 @@
+# Dataset building
+faster-whisper>=1.2.0
+paddleocr>=3.0.0
+paddlepaddle>=3.0.0
+rapidfuzz>=3.0.0
+yt-dlp>=2024.0.0
+
+# Fine-tuning Whisper (install when you are ready to train)
+# transformers>=4.44.0
+# datasets>=2.20.0
+# accelerate>=0.33.0
+# evaluate>=0.4.0
+# jiwer>=3.0.0
+# torch>=2.2.0
+# soundfile>=0.12.0
+# librosa>=0.10.0
+# tensorboard

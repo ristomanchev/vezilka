@@ -1,0 +1,47 @@
+# ---------------------------------------------------------------------------
+# Local Python environment — colleague recreates it from requirements.txt.
+# (Also contains files >100 MB that GitHub rejects, e.g. libpaddle.so.)
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+env/
+
+# ---------------------------------------------------------------------------
+# Regenerable pipeline caches — not source, just intermediate work.
+#   _temp_v1_old/  : leftovers from the old build_stt_dataset_v1_old.py (~880 MB)
+#   _temp_v2_new/   : per-video audio + whisper/ocr JSON caches, rebuilt on rerun
+# ---------------------------------------------------------------------------
+_temp_v1_old/
+_temp_v2_new/
+
+# ---------------------------------------------------------------------------
+# Training output (Whisper checkpoints — several GB once train_whisper.py runs)
+# ---------------------------------------------------------------------------
+whisper-mk-finetuned/
+*.ckpt
+runs/
+
+# ---------------------------------------------------------------------------
+# Python bytecode / tooling
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------------------
+# Editor / OS noise
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+.DS_Store
+
+# ---------------------------------------------------------------------------
+# Raw scraped source videos — inputs, not the deliverable. ~550 MB, and they
+# make the push unreliable. The processed clips live in dataset_v2_new/clips/.
+# Re-fetch with download_reel.py if needed.
+# ---------------------------------------------------------------------------
+downloads/
+baba_ruza/
+test_downloads/
