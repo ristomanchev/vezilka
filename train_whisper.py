@@ -122,37 +122,48 @@ def main():
     model.generation_config.task = TASK
     model.generation_config.forced_decoder_ids = None
 
+    # MAX_STEPS=20 for a quick smoke test before committing to a full run.
+    max_steps = int(os.environ.get("MAX_STEPS", 1000))
+    ckpt_steps = max(5, min(250, max_steps // 4))
+
     args = Seq2SeqTrainingArguments(
         output_dir=str(OUTPUT_DIR),
         per_device_train_batch_size=8,
         gradient_accumulation_steps=2,
         learning_rate=1e-5,
-        warmup_steps=50,
-        max_steps=1000,
+        warmup_steps=min(50, max_steps // 4),
+        max_steps=max_steps,
         gradient_checkpointing=True,
         fp16=torch.cuda.is_available(),
         eval_strategy="steps",
         per_device_eval_batch_size=8,
         predict_with_generate=True,
         generation_max_length=225,
-        save_steps=250,
-        eval_steps=250,
-        logging_steps=25,
+        save_steps=ckpt_steps,
+        eval_steps=ckpt_steps,
+        logging_steps=max(1, ckpt_steps // 10),
         report_to=["tensorboard"],
         load_best_model_at_end=True,
         metric_for_best_model="wer",
         greater_is_better=False,
     )
 
-    trainer = Seq2SeqTrainer(
+    # transformers >= 4.46 renamed `tokenizer=` to `processing_class=`;
+    # older versions only accept `tokenizer=`. Support both.
+    trainer_kwargs = dict(
         args=args,
         model=model,
         train_dataset=ds_train,
         eval_dataset=ds_test,
         data_collator=Collator(processor=processor),
         compute_metrics=compute_metrics,
-        tokenizer=processor.feature_extractor,
     )
+    import inspect as _inspect
+    if "processing_class" in _inspect.signature(Seq2SeqTrainer.__init__).parameters:
+        trainer_kwargs["processing_class"] = processor
+    else:
+        trainer_kwargs["tokenizer"] = processor.feature_extractor
+    trainer = Seq2SeqTrainer(**trainer_kwargs)
 
     trainer.train()
     trainer.save_model(str(OUTPUT_DIR))
