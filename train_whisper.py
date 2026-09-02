@@ -1,28 +1,41 @@
 """
-Fine-tune Whisper on the Macedonian dataset produced by build_stt_dataset_v2_new.py.
+Fine-tune Whisper on the Macedonian dataset from build_stt_dataset_v2_new.py,
+optionally mixed with public Macedonian corpora, and evaluate with a
+normalised WER (lower-cased, punctuation-stripped) as in the Whisper paper.
 
 Install first:
-    .venv/bin/pip install "transformers>=4.44" "datasets>=2.20" accelerate \
-        evaluate jiwer torch soundfile librosa tensorboard
+    pip install "transformers>=4.44" "datasets>=2.20" accelerate evaluate \
+        jiwer torch soundfile librosa tensorboard
 
-Then:
-    .venv/bin/python train_whisper.py
+Run:
+    python train_whisper.py
 
-Notes
------
-* Uses dataset_v2_new/metadata.csv (the GOLD split) by default. Set INCLUDE_SILVER=1
-  in the environment to also train on the silver clips.
-* Base checkpoint defaults to openai/whisper-small. For real quality on
-  Macedonian use whisper-large-v3, but that needs a GPU.
-* The `split` column decides train vs. test.
+Environment knobs
+-----------------
+    BASE_MODEL      openai/whisper-small (default) | openai/whisper-medium | ...
+    INCLUDE_SILVER  1  -> also use dataset_v2_new/metadata_silver.csv
+    EXTRA_DATA      "fleurs" (default) | "none" | "fleurs,commonvoice"
+                    fleurs      = google/fleurs  mk_mk           (~10 h, open)
+                    commonvoice = mozilla-foundation/common_voice_17_0 mk
+                                  (needs `huggingface-cli login` + accepting
+                                   the dataset terms on its HF page)
+    MAX_STEPS       1000 (default). 20 = quick smoke test.
+    BATCH          per-device train batch (auto: small 8 / medium 4 / large 2)
+    DROPOUT        0.1 (default) - regularisation against over-fitting
+    LR             1e-5 (default)
+
+The test set is always ONLY your own clips (the social-media video domain),
+so the WER number reflects the task you actually care about.
 """
 
 import os
+import re
+import csv
 from pathlib import Path
 
 import evaluate
 import torch
-from datasets import Audio, Dataset, concatenate_datasets
+from datasets import Audio, Dataset, concatenate_datasets, load_dataset
 from transformers import (
     WhisperFeatureExtractor,
     WhisperForConditionalGeneration,
@@ -30,20 +43,41 @@ from transformers import (
     WhisperTokenizer,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
+    EarlyStoppingCallback,
 )
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "dataset_v2_new"
-BASE_MODEL = os.environ.get("BASE_MODEL", "openai/whisper-small")
 OUTPUT_DIR = ROOT / "whisper-mk-finetuned"
+BASE_MODEL = os.environ.get("BASE_MODEL", "openai/whisper-small")
 LANGUAGE = "macedonian"
 TASK = "transcribe"
 INCLUDE_SILVER = os.environ.get("INCLUDE_SILVER") == "1"
+EXTRA_DATA = [s.strip().lower() for s in os.environ.get("EXTRA_DATA", "fleurs").split(",") if s.strip()]
+MAX_STEPS = int(os.environ.get("MAX_STEPS", 1000))
+DROPOUT = float(os.environ.get("DROPOUT", 0.1))
+LR = float(os.environ.get("LR", 1e-5))
 
-import csv
+
+# --------------------------------------------------------------------------- #
+# Normalised WER  (lower-case, strip punctuation, collapse whitespace)
+# --------------------------------------------------------------------------- #
+
+_PUNCT = re.compile(r"[^\w\s]", flags=re.UNICODE)
 
 
-def load_rows(csv_path):
+def norm_text(s):
+    s = (s or "").lower().strip()
+    s = _PUNCT.sub(" ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+# --------------------------------------------------------------------------- #
+# Data
+# --------------------------------------------------------------------------- #
+
+def load_our_rows(csv_path):
     rows = []
     with open(csv_path, encoding="utf-8") as f:
         for r in csv.DictReader(f):
@@ -55,18 +89,52 @@ def load_rows(csv_path):
     return rows
 
 
-def build_dataset():
-    rows = load_rows(DATA_DIR / "metadata.csv")
+def our_datasets():
+    rows = load_our_rows(DATA_DIR / "metadata.csv")
     if INCLUDE_SILVER and (DATA_DIR / "metadata_silver.csv").exists():
-        rows += load_rows(DATA_DIR / "metadata_silver.csv")
+        rows += load_our_rows(DATA_DIR / "metadata_silver.csv")
+    train = [{"audio": r["audio"], "sentence": r["sentence"]} for r in rows if r["split"] != "test"]
+    test = [{"audio": r["audio"], "sentence": r["sentence"]} for r in rows if r["split"] == "test"]
+    mk = lambda lst: Dataset.from_list(lst).cast_column("audio", Audio(sampling_rate=16000))
+    return mk(train), mk(test)
 
-    train = [r for r in rows if r["split"] != "test"]
-    test = [r for r in rows if r["split"] == "test"]
-    print(f"train={len(train)}  test={len(test)}")
 
-    ds_train = Dataset.from_list(train).cast_column("audio", Audio(sampling_rate=16000))
-    ds_test = Dataset.from_list(test).cast_column("audio", Audio(sampling_rate=16000))
-    return ds_train, ds_test
+def load_extra_train():
+    """Extra Macedonian training data. Returns a list of Datasets with
+    columns {audio (16 kHz), sentence}. Failures are warned, not fatal."""
+    out = []
+    for src in EXTRA_DATA:
+        if src == "none":
+            continue
+        try:
+            if src == "fleurs":
+                d = load_dataset("google/fleurs", "mk_mk", split="train")
+                d = d.select_columns(["audio", "raw_transcription"]).rename_column("raw_transcription", "sentence")
+            elif src == "commonvoice":
+                d = load_dataset("mozilla-foundation/common_voice_17_0", "mk", split="train")
+                d = d.select_columns(["audio", "sentence"])
+            else:
+                print(f"[extra] unknown source '{src}', skipping")
+                continue
+            d = d.cast_column("audio", Audio(sampling_rate=16000))
+            d = d.filter(lambda s: bool(s and s.strip()), input_columns=["sentence"])
+            print(f"[extra] {src}: {len(d)} clips")
+            out.append(d)
+        except Exception as e:
+            print(f"[extra] could not load '{src}': {e}\n"
+                  f"        (commonvoice needs `huggingface-cli login` + accepting its terms)")
+    return out
+
+
+# --------------------------------------------------------------------------- #
+
+def auto_batch(model_name):
+    n = model_name.lower()
+    if "large" in n:
+        return 2, 8
+    if "medium" in n:
+        return 4, 4
+    return 8, 2
 
 
 def main():
@@ -74,7 +142,9 @@ def main():
     tokenizer = WhisperTokenizer.from_pretrained(BASE_MODEL, language=LANGUAGE, task=TASK)
     processor = WhisperProcessor.from_pretrained(BASE_MODEL, language=LANGUAGE, task=TASK)
 
-    ds_train, ds_test = build_dataset()
+    ds_train_ours, ds_test = our_datasets()
+    extra = load_extra_train()
+    print(f"our train={len(ds_train_ours)}  test={len(ds_test)}  extra sources={len(extra)}")
 
     def prepare(batch):
         audio = batch["audio"]
@@ -84,8 +154,14 @@ def main():
         batch["labels"] = tokenizer(batch["sentence"]).input_ids
         return batch
 
-    ds_train = ds_train.map(prepare, remove_columns=ds_train.column_names)
-    ds_test = ds_test.map(prepare, remove_columns=ds_test.column_names)
+    proc = lambda d: d.map(prepare, remove_columns=d.column_names,
+                           num_proc=os.cpu_count() if len(d) > 500 else 1)
+
+    train_parts = [proc(ds_train_ours)] + [proc(d) for d in extra]
+    ds_train = train_parts[0] if len(train_parts) == 1 else concatenate_datasets(train_parts)
+    ds_train = ds_train.shuffle(seed=42)
+    ds_test = proc(ds_test)
+    print(f"TOTAL train examples: {len(ds_train)}")
 
     import dataclasses
     from typing import Any
@@ -110,46 +186,55 @@ def main():
     metric = evaluate.load("wer")
 
     def compute_metrics(pred):
-        pred_ids = pred.predictions
         label_ids = pred.label_ids
         label_ids[label_ids == -100] = tokenizer.pad_token_id
-        pred_str = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
+        pred_str = tokenizer.batch_decode(pred.predictions, skip_special_tokens=True)
         label_str = tokenizer.batch_decode(label_ids, skip_special_tokens=True)
-        return {"wer": 100 * metric.compute(predictions=pred_str, references=label_str)}
 
-    model = WhisperForConditionalGeneration.from_pretrained(BASE_MODEL)
+        wer_raw = 100 * metric.compute(predictions=pred_str, references=label_str)
+
+        pairs = [(norm_text(p), norm_text(l)) for p, l in zip(pred_str, label_str)]
+        pairs = [(p, l) for p, l in pairs if l]          # jiwer errors on empty refs
+        wer_norm = 100 * metric.compute(
+            predictions=[p for p, _ in pairs], references=[l for _, l in pairs]
+        )
+        return {"wer": round(wer_norm, 2), "wer_raw": round(wer_raw, 2)}
+
+    model = WhisperForConditionalGeneration.from_pretrained(
+        BASE_MODEL, dropout=DROPOUT, attention_dropout=DROPOUT
+    )
     model.generation_config.language = LANGUAGE
     model.generation_config.task = TASK
     model.generation_config.forced_decoder_ids = None
 
-    # MAX_STEPS=20 for a quick smoke test before committing to a full run.
-    max_steps = int(os.environ.get("MAX_STEPS", 1000))
-    ckpt_steps = max(5, min(250, max_steps // 4))
+    ckpt_steps = max(5, min(250, MAX_STEPS // 4))
+    bs, ga = auto_batch(BASE_MODEL)
+    bs = int(os.environ.get("BATCH", bs))
 
     args = Seq2SeqTrainingArguments(
         output_dir=str(OUTPUT_DIR),
-        per_device_train_batch_size=8,
-        gradient_accumulation_steps=2,
-        learning_rate=1e-5,
-        warmup_steps=min(50, max_steps // 4),
-        max_steps=max_steps,
+        per_device_train_batch_size=bs,
+        gradient_accumulation_steps=ga,
+        per_device_eval_batch_size=bs,
+        learning_rate=LR,
+        weight_decay=0.01,
+        warmup_steps=min(80, MAX_STEPS // 4),
+        max_steps=MAX_STEPS,
         gradient_checkpointing=True,
         fp16=torch.cuda.is_available(),
         eval_strategy="steps",
-        per_device_eval_batch_size=8,
         predict_with_generate=True,
         generation_max_length=225,
         save_steps=ckpt_steps,
         eval_steps=ckpt_steps,
         logging_steps=max(1, ckpt_steps // 10),
+        save_total_limit=2,
         report_to=["tensorboard"],
         load_best_model_at_end=True,
         metric_for_best_model="wer",
         greater_is_better=False,
     )
 
-    # transformers >= 4.46 renamed `tokenizer=` to `processing_class=`;
-    # older versions only accept `tokenizer=`. Support both.
     trainer_kwargs = dict(
         args=args,
         model=model,
@@ -157,6 +242,7 @@ def main():
         eval_dataset=ds_test,
         data_collator=Collator(processor=processor),
         compute_metrics=compute_metrics,
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=4)],
     )
     import inspect as _inspect
     if "processing_class" in _inspect.signature(Seq2SeqTrainer.__init__).parameters:
@@ -165,9 +251,16 @@ def main():
         trainer_kwargs["tokenizer"] = processor.feature_extractor
     trainer = Seq2SeqTrainer(**trainer_kwargs)
 
+    # baseline: the un-tuned model, same normalised metric
+    print("\n=== baseline eval (before fine-tuning) ===")
+    print(trainer.evaluate())
+
     trainer.train()
     trainer.save_model(str(OUTPUT_DIR))
     processor.save_pretrained(str(OUTPUT_DIR))
+
+    print("\n=== final eval (best checkpoint) ===")
+    print(trainer.evaluate())
     print("Saved to", OUTPUT_DIR)
 
 
