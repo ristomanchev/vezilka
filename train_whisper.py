@@ -48,7 +48,11 @@ from transformers import (
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "dataset_v2_new"
-OUTPUT_DIR = ROOT / "whisper-mk-finetuned"
+# OUTPUT_DIR=/content/drive/MyDrive/whisper-mk-run  -> checkpoints land on Drive
+# as they are written, so a Colab disconnect is not fatal. Then re-run the same
+# command with RESUME=1 to continue from the last checkpoint.
+OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", ROOT / "whisper-mk-finetuned"))
+RESUME = os.environ.get("RESUME") == "1"
 BASE_MODEL = os.environ.get("BASE_MODEL", "openai/whisper-small")
 LANGUAGE = "macedonian"
 TASK = "transcribe"
@@ -251,11 +255,15 @@ def main():
         trainer_kwargs["tokenizer"] = processor.feature_extractor
     trainer = Seq2SeqTrainer(**trainer_kwargs)
 
-    # baseline: the un-tuned model, same normalised metric
-    print("\n=== baseline eval (before fine-tuning) ===")
-    print(trainer.evaluate())
+    resume = RESUME or (OUTPUT_DIR.exists() and any(OUTPUT_DIR.glob("checkpoint-*")))
+    if resume:
+        print(f"\n=== resuming from last checkpoint in {OUTPUT_DIR} ===")
+    else:
+        # baseline: the un-tuned model, same normalised metric
+        print("\n=== baseline eval (before fine-tuning) ===")
+        print(trainer.evaluate())
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=resume)
     trainer.save_model(str(OUTPUT_DIR))
     processor.save_pretrained(str(OUTPUT_DIR))
 
