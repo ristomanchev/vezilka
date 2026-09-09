@@ -1,33 +1,3 @@
-"""
-Fine-tune Whisper on the Macedonian dataset from build_stt_dataset_v2_new.py,
-optionally mixed with public Macedonian corpora, and evaluate with a
-normalised WER (lower-cased, punctuation-stripped) as in the Whisper paper.
-
-Install first:
-    pip install "transformers>=4.44" "datasets>=2.20" accelerate evaluate \
-        jiwer torch soundfile librosa tensorboard
-
-Run:
-    python train_whisper.py
-
-Environment knobs
------------------
-    BASE_MODEL      openai/whisper-small (default) | openai/whisper-medium | ...
-    INCLUDE_SILVER  1  -> also use dataset_v2_new/metadata_silver.csv
-    EXTRA_DATA      "fleurs" (default) | "none" | "fleurs,commonvoice"
-                    fleurs      = google/fleurs  mk_mk           (~10 h, open)
-                    commonvoice = mozilla-foundation/common_voice_17_0 mk
-                                  (needs `huggingface-cli login` + accepting
-                                   the dataset terms on its HF page)
-    MAX_STEPS       1000 (default). 20 = quick smoke test.
-    BATCH          per-device train batch (auto: small 8 / medium 4 / large 2)
-    DROPOUT        0.1 (default) - regularisation against over-fitting
-    LR             1e-5 (default)
-
-The test set is always ONLY your own clips (the social-media video domain),
-so the WER number reflects the task you actually care about.
-"""
-
 import os
 import re
 import csv

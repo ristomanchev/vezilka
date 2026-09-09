@@ -1,29 +1,3 @@
-"""
-Bulk-download source videos into downloads/ for the STT dataset pipeline.
-
-Usage
------
-    # one or more URLs on the command line
-    python download_reel.py https://www.instagram.com/reel/XXXX/ https://vm.tiktok.com/YYYY/
-
-    # a text file with one URL per line ('#' comments and blank lines ignored)
-    python download_reel.py urls.txt
-
-    # a whole channel / playlist / profile — yt-dlp expands it to every video
-    python download_reel.py https://www.tiktok.com/@someaccount
-    python download_reel.py "https://www.youtube.com/@somechannel/shorts" --max 200
-
-    # interactive (old behaviour) if no arguments
-    python download_reel.py
-
-Notes
------
-* Already-downloaded videos are skipped (recorded in downloads/.download-archive).
-* Errors on one URL do not stop the rest; failures are listed at the end and
-  appended to downloads/failed.txt.
-* --max N limits how many NEW videos to pull this run (useful for channels).
-"""
-
 import sys
 from pathlib import Path
 

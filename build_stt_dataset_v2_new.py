@@ -1,36 +1,3 @@
-"""
-Build a Macedonian speech-to-text dataset for fine-tuning Whisper.
-
-Strategy (why it is built this way):
-  The on-screen burned-in subtitles are NOT reliable enough to be used as
-  training labels directly (OCR of stylised Cyrillic fonts is very noisy and
-  the caption timing does not match the audio). So instead:
-
-    1. An existing Whisper model (faster-whisper) transcribes the audio with
-       VAD-based segmentation and word timestamps  -> well-aligned candidate
-       label + text that is already properly cased and punctuated.
-    2. PaddleOCR reads the burned-in subtitles from the video frames.
-    3. A segment is kept as GOLD only when the Whisper transcript and the
-       OCR subtitle text AGREE (fuzzy match) over the same time window.
-       Agreement means: the words are almost certainly correct AND the audio
-       is aligned with them.
-    4. Segments with no OCR confirmation are still written, separately, as
-       SILVER data (usable, lower confidence).
-
-Output (HuggingFace `audiofolder` compatible):
-    dataset_v2_new/
-        clips/*.wav                 16 kHz mono clips
-        metadata.csv                GOLD only  -> file_name,transcription,split
-        metadata_silver.csv         SILVER only
-        metadata_full.csv           everything + diagnostics
-        report.txt                  summary stats
-
-Run:
-    .venv/bin/python build_stt_dataset_v2_new.py
-Small test:
-    set MAX_VIDEOS_TO_PROCESS = 2  below.
-"""
-
 from pathlib import Path
 import subprocess
 import json

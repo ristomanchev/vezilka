@@ -1,20 +1,3 @@
-"""
-Transcribe any audio/video file with a Whisper model - use it to sanity-check
-the base model or your fine-tuned one.
-
-    # base faster-whisper large-v3 (same model the dataset builder uses)
-    .venv/bin/python transcribe.py downloads/DVl1RifDEvf.mp4
-
-    # a different size
-    .venv/bin/python transcribe.py somefile.mp4 --model medium
-
-    # your fine-tuned HuggingFace model (after train_whisper.py)
-    .venv/bin/python transcribe.py somefile.mp4 --hf whisper-mk-finetuned
-
-    # compare against the dataset label for a specific clip
-    .venv/bin/python transcribe.py dataset_v2_new/clips/dvl1rifdevf_000003.wav --label
-"""
-
 import argparse
 import csv
 import sys

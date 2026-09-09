@@ -1,12 +1,3 @@
-"""
-Unit tests for the pure functions in build_stt_dataset_v2_new.py.
-
-Run:
-    .venv/bin/python -m pytest tests/ -q
-or without pytest:
-    .venv/bin/python tests/test_pipeline.py
-"""
-
 import sys
 from pathlib import Path
 
