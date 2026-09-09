@@ -1,15 +1,3 @@
-"""
-Inspect the dataset produced by build_stt_dataset_v2_new.py.
-
-    .venv/bin/python inspect_dataset.py               # summary + a few samples
-    .venv/bin/python inspect_dataset.py --n 20        # more samples
-    .venv/bin/python inspect_dataset.py --source silver
-    .venv/bin/python inspect_dataset.py --play 5      # open 5 GOLD clips in your audio player
-    .venv/bin/python inspect_dataset.py --grep индукц # rows whose text matches
-
-The --play option uses `afplay` on macOS so you can listen and check the
-transcript really matches the audio.
-"""
 
 import argparse
 import csv
