@@ -43,13 +43,9 @@ import sys
 
 from rapidfuzz import fuzz
 
-# ----------------------------------------------------------------------------
-# Config
-# ----------------------------------------------------------------------------
 
 ROOT_DIR = Path(__file__).resolve().parent
 
-# All folders that contain source videos.
 VIDEO_DIRS = [
     ROOT_DIR / "downloads",
     ROOT_DIR / "baba_ruza",
@@ -57,70 +53,48 @@ VIDEO_DIRS = [
 
 OUT_DIR = ROOT_DIR / "dataset_v2_new"
 CLIPS_DIR = OUT_DIR / "clips"
-CACHE_DIR = ROOT_DIR / "_temp_v2_new"          # per-video whisper + ocr caches
+CACHE_DIR = ROOT_DIR / "_temp_v2_new"
 
-# Whisper model used for pseudo-labelling.
-#   "large-v3"  -> best Macedonian quality (recommended), ~3 GB download
-#   "medium"    -> ~3x faster, noticeably weaker on Macedonian
-#   "small"     -> only for a quick smoke test
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3")
 WHISPER_DEVICE = "cpu"
-WHISPER_COMPUTE_TYPE = "int8"              # good speed/quality on Apple Silicon CPU
+WHISPER_COMPUTE_TYPE = "int8"
 LANGUAGE = "mk"
 
-# Bias the decoder towards clean Macedonian orthography.
 INITIAL_PROMPT = "Ова е транскрипт на македонски јазик со правилна интерпункција."
 
-# OCR (subtitle reading) settings.
-OCR_FPS = 1.0                             # frames per second sent to OCR
+OCR_FPS = 1.0
 OCR_CONFIDENCE = 0.50
 
-# A Whisper segment is GOLD when BOTH hold for the overlapping OCR text:
-#   fuzzy score (token_sort_ratio, 0-100) >= AGREEMENT_THRESHOLD
-#   word recall (share of Whisper content words found in the OCR text) >= WORD_RECALL_MIN
 AGREEMENT_THRESHOLD = 58
 WORD_RECALL_MIN = 0.55
-OCR_TIME_MARGIN = 1.0                     # seconds of slack when matching OCR to a segment
-                                         # (Whisper often merges 2 subtitle cards
-                                         #  into one spoken sentence)
+OCR_TIME_MARGIN = 1.0
 
-# Segment length limits (Whisper is trained on <= 30 s).
 MIN_SEGMENT_SECONDS = 1.0
 MAX_SEGMENT_SECONDS = 30.0
-CLIP_PAD_SECONDS = 0.15                   # padding added around each audio cut
+CLIP_PAD_SECONDS = 0.15
 
-# Drop likely Whisper hallucinations.
 MAX_NO_SPEECH_PROB = 0.6
 MIN_AVG_LOGPROB = -1.1
 MAX_COMPRESSION_RATIO = 2.4
 
-# Text sanity limits.
 MIN_WORDS = 2
 MIN_CYRILLIC_CHARS = 3
 MAX_LATIN_RATIO = 0.5
 
-# Deterministic train/test split: 1 in TEST_EVERY videos goes to the test set
-# (split by video so clips from one video never leak across the split).
 TEST_EVERY = 10
 
-# None = process everything. Set to a small number for a test run.
 MAX_VIDEOS_TO_PROCESS = None
 if os.environ.get("MAX_VIDEOS"):
     MAX_VIDEOS_TO_PROCESS = int(os.environ["MAX_VIDEOS"])
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
 
-# Obvious non-speech / brand / watermark text that sometimes survives.
 BLACKLIST_SUBSTRINGS = [
     "MILD HOME", "MILD HOME STORE", "SMART", "COLLECTION", "COLLACFIMN",
     "ANSER", "CRISTAL", "STORE", "WWW.", "HTTP", ".COM", ".MK",
     "FOLLOW", "SUBSCRIBE", "LIKE", "SHARE", "TIKTOK", "INSTAGRAM",
 ]
 
-
-# ----------------------------------------------------------------------------
-# Shell helpers
-# ----------------------------------------------------------------------------
 
 def run_command(command):
     result = subprocess.run(
@@ -143,10 +117,6 @@ def ffprobe_duration(path):
     except ValueError:
         return 0.0
 
-
-# ----------------------------------------------------------------------------
-# Text cleaning / normalisation
-# ----------------------------------------------------------------------------
 
 MK_LETTER_CLASS = r"А-Шабвгдѓежзѕијклљмнњопрстќуфхцчџш" + \
     "АБВГДЃЕЖЗЅИЈКЛЉМНЊОПРСТЌУФХЦЧЏШ"
@@ -176,7 +146,6 @@ def normalize_text(text):
     text = text.replace("“", '"').replace("”", '"').replace("„", '"')
     text = text.replace("’", "'").replace("‘", "'")
     text = re.sub(r"\s+", " ", text).strip()
-    # trim leading/trailing stray punctuation but keep sentence-final marks
     text = text.strip(" -–—•*_")
     return text
 
@@ -213,8 +182,6 @@ def agreement(label, ocr_text):
         return 0, 0.0
     a = normalize_for_compare(label)
     b = normalize_for_compare(ocr_text)
-    # token_sort_ratio respects word content+order better than token_set_ratio,
-    # which ignores duplicates/extras and over-rewards partial overlap.
     fuzzy = int(fuzz.token_sort_ratio(a, b))
     return fuzzy, word_recall(label, ocr_text)
 
@@ -243,16 +210,11 @@ def label_is_sane(text):
     for bad in BLACKLIST_SUBSTRINGS:
         if bad in upper:
             return False, f"blacklist:{bad}"
-    # repeated-token hallucination guard
     low = [w.lower() for w in words]
     if len(low) >= 6 and len(set(low)) <= max(2, len(low) // 4):
         return False, "repetitive"
     return True, "ok"
 
-
-# ----------------------------------------------------------------------------
-# Audio / frames extraction
-# ----------------------------------------------------------------------------
 
 def extract_audio(video_path, audio_path):
     run_command([
@@ -278,10 +240,6 @@ def cut_audio_segment(audio_path, output_path, start, end, total_duration):
         "-ac", "1", "-ar", "16000", str(output_path),
     ])
 
-
-# ----------------------------------------------------------------------------
-# Whisper pseudo-labelling  (cached per video)
-# ----------------------------------------------------------------------------
 
 _WHISPER_MODEL_OBJ = None
 
@@ -340,10 +298,6 @@ def segment_is_confident(seg):
     return True
 
 
-# ----------------------------------------------------------------------------
-# OCR subtitle reading  (cached per video)
-# ----------------------------------------------------------------------------
-
 _OCR_OBJ = None
 
 
@@ -352,12 +306,6 @@ def get_ocr():
     if _OCR_OBJ is None:
         from paddleocr import PaddleOCR
         print("Loading PaddleOCR (Cyrillic, mobile) ...")
-        # mobile detector + no doc-orientation / unwarp / textline-orientation:
-        # subtitles are large, upright, unwarped -> ~5-10x faster on CPU.
-        # Explicit model names: fast mobile detector + the Cyrillic mobile
-        # recogniser. NOTE: once any *_model_name is set, PaddleOCR ignores
-        # `lang=`, so the recogniser MUST be named explicitly or it silently
-        # falls back to a Latin model and produces transliterated garbage.
         common = dict(
             text_detection_model_name="PP-OCRv5_mobile_det",
             text_recognition_model_name="cyrillic_PP-OCRv5_mobile_rec",
@@ -426,17 +374,12 @@ def ocr_text_for_window(ocr_results, start, end):
     for item in ocr_results:
         if start - OCR_TIME_MARGIN <= item["time"] <= end + OCR_TIME_MARGIN:
             parts.append(item["text"])
-    # de-duplicate consecutive identical lines
     dedup = []
     for p in parts:
         if not dedup or fuzz.ratio(dedup[-1].lower(), p.lower()) < 90:
             dedup.append(p)
     return " ".join(dedup)
 
-
-# ----------------------------------------------------------------------------
-# Per-video processing
-# ----------------------------------------------------------------------------
 
 def process_video(video_path):
     vid = clean_filename(video_path.stem)
@@ -508,10 +451,6 @@ def process_video(video_path):
     return rows
 
 
-# ----------------------------------------------------------------------------
-# Main
-# ----------------------------------------------------------------------------
-
 def split_for_video(video_name):
     h = int(hashlib.md5(video_name.encode()).hexdigest(), 16)
     return "test" if h % TEST_EVERY == 0 else "train"
@@ -558,7 +497,6 @@ def main():
                 "ocr_score": "", "file_name": "",
             })
 
-    # attach split
     for r in all_rows:
         r["split"] = split_for_video(r.get("video", "")) if r.get("source") in ("gold", "silver") else ""
 

@@ -46,7 +46,6 @@ def collect_urls(args):
                     urls.append(line)
         else:
             urls.append(a)
-    # de-dupe, keep order
     seen = set()
     return [u for u in urls if not (u in seen or seen.add(u))]
 
@@ -76,7 +75,7 @@ def main(argv):
         "outtmpl": str(OUT_DIR / "%(id)s.%(ext)s"),
         "format": "mp4/bestvideo*+bestaudio/best",
         "download_archive": str(ARCHIVE),
-        "ignoreerrors": True,          # keep going past a bad URL
+        "ignoreerrors": True,
         "quiet": False,
         "noprogress": False,
         "retries": 3,

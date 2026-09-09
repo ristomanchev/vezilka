@@ -13,9 +13,6 @@ DATASET_DIR = ROOT_DIR / "dataset_v1_old"
 CLIPS_DIR = DATASET_DIR / "clips"
 TEMP_DIR = ROOT_DIR / "_temp_v1_old"
 
-# Lower FPS = faster OCR.
-# FPS = 1 means OCR checks 1 frame per second.
-# You can use 0.5 for 1 frame every 2 seconds.
 FPS = 1
 
 OCR_CONFIDENCE = 0.50
@@ -24,14 +21,9 @@ SIMILARITY_THRESHOLD = 85
 MIN_SEGMENT_SECONDS = 0.7
 MAX_SEGMENT_SECONDS = 20.0
 
-# Text that appears too many times is probably a logo, poster, background text, etc.
 STATIC_TEXT_MAX_REPETITIONS = 8
 
-# For small testing, set this to 1, 3, 5, etc.
-# For full run, set it to None.
 MAX_VIDEOS_TO_PROCESS = None
-# Example:
-# MAX_VIDEOS_TO_PROCESS = 3
 
 
 def run_command(command):
@@ -62,7 +54,6 @@ def clean_text(text):
     text = text.replace("\n", " ")
     text = re.sub(r"\s+", " ", text)
 
-    # Keep Macedonian Cyrillic, Latin letters, numbers and normal punctuation.
     text = re.sub(
         r"[^А-ШЃЖЗЅИЈЉЊЌУФХЦЧЏа-шѓжзѕијљњќуфхцчџA-Za-z0-9.!?,:'\"()\-\s]+",
         "",
@@ -93,11 +84,9 @@ def is_good_transcript(text):
 
     words = text.split()
 
-    # Too short is often not useful or is logo text.
     if len(words) < 2:
         return False
 
-    # Too long is often a poster/list/background paragraph.
     if len(words) > 18:
         return False
 
@@ -106,19 +95,15 @@ def is_good_transcript(text):
     digit_count = count_digits(text)
     total_letters = cyrillic_count + latin_count
 
-    # Macedonian subtitles should contain Cyrillic.
     if cyrillic_count < 3:
         return False
 
-    # Remove codes/numbers like 22X36, 1500M8000M, etc.
     if digit_count > 2:
         return False
 
-    # Remove mostly English/logo text.
     if total_letters > 0 and latin_count / total_letters > 0.50:
         return False
 
-    # Remove common background/logo/brand words.
     blacklist = [
         "NIKE",
         "LTE",
@@ -168,7 +153,6 @@ def extract_audio(video_path, audio_path):
 def extract_frames(video_path, frames_dir):
     frames_dir.mkdir(parents=True, exist_ok=True)
 
-    # Full-frame OCR because subtitles appear in different areas.
     command = [
         "ffmpeg",
         "-y",
@@ -186,7 +170,6 @@ def extract_text_from_paddle_result(result):
     for res in result:
         data = None
 
-        # PaddleOCR 3.x usually returns result objects.
         if hasattr(res, "json"):
             data = res.json
 
@@ -201,7 +184,6 @@ def extract_text_from_paddle_result(result):
 
         possible_data_objects = [data]
 
-        # Some PaddleOCR versions store useful data inside "res".
         if "res" in data and isinstance(data["res"], dict):
             possible_data_objects.append(data["res"])
 
@@ -478,8 +460,6 @@ def main():
 
     print("Loading OCR model...")
 
-    # Macedonian uses Cyrillic.
-    # This loads the Cyrillic OCR recognition model.
     ocr = PaddleOCR(lang="mk")
 
     all_rows = []

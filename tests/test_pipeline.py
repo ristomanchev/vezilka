@@ -15,10 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import build_stt_dataset_v2_new as b
 
 
-# --------------------------------------------------------------------------- #
-# normalize_text
-# --------------------------------------------------------------------------- #
-
 def test_normalize_strips_emoji_and_hashtags_and_urls():
     out = b.normalize_text("Здраво 👋 сите #мкд виж https://x.com/a  @user")
     assert "👋" not in out
@@ -35,10 +31,6 @@ def test_normalize_collapses_whitespace_and_quotes():
 def test_normalize_keeps_case_and_sentence_punctuation():
     assert b.normalize_text("Ова е тест.") == "Ова е тест."
 
-
-# --------------------------------------------------------------------------- #
-# label_is_sane
-# --------------------------------------------------------------------------- #
 
 def test_label_sane_accepts_normal_macedonian_sentence():
     ok, why = b.label_is_sane("Готвам директно на неа и веднаш можам да го допрам местото.")
@@ -65,10 +57,6 @@ def test_label_sane_rejects_repetitive_hallucination():
     assert not ok and why == "repetitive"
 
 
-# --------------------------------------------------------------------------- #
-# word_recall / agreement
-# --------------------------------------------------------------------------- #
-
 def test_word_recall_full_match():
     r = b.word_recall("работната површина останува безбедна",
                       "РАБОТНАТА ПОВРШИНА ОСТАНУВА БЕЗБЕДНА")
@@ -90,7 +78,6 @@ def test_agreement_gold_case():
 
 
 def test_agreement_rejects_wide_ocr_blob_with_few_shared_words():
-    # Whisper garble from a dialect clip vs a big unrelated OCR blob.
     label = "Мене на тебе китекен да ми свараш на каф."
     ocr = ("Ла и кафенце ни сварии тука не на тебе ке ти текне да ми свараш.. "
            "Ај арно се имме, да не се раскараме ајде... Еден избор MILD HOME STORE")
@@ -102,15 +89,11 @@ def test_agreement_empty_ocr():
     assert b.agreement("нешто тука", "") == (0, 0.0)
 
 
-# --------------------------------------------------------------------------- #
-# grouping helpers
-# --------------------------------------------------------------------------- #
-
 def test_ocr_text_for_window_filters_by_time():
     ocr = [
         {"time": 0.0, "text": "прв"},
         {"time": 5.0, "text": "во прозорецот"},
-        {"time": 5.5, "text": "во прозорецот"},   # near-dup, should collapse
+        {"time": 5.5, "text": "во прозорецот"},
         {"time": 20.0, "text": "далеку"},
     ]
     out = b.ocr_text_for_window(ocr, 4.8, 6.0)
@@ -129,8 +112,6 @@ def test_clean_filename():
     assert b.clean_filename("DVTZhGAjMMX") == "dvtzhgajmmx"
     assert b.clean_filename("baba ruza #2") == "baba_ruza_2"
 
-
-# --------------------------------------------------------------------------- #
 
 if __name__ == "__main__":
     funcs = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

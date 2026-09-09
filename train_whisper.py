@@ -48,9 +48,6 @@ from transformers import (
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "dataset_v2_new"
-# OUTPUT_DIR=/content/drive/MyDrive/whisper-mk-run  -> checkpoints land on Drive
-# as they are written, so a Colab disconnect is not fatal. Then re-run the same
-# command with RESUME=1 to continue from the last checkpoint.
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", ROOT / "whisper-mk-finetuned"))
 RESUME = os.environ.get("RESUME") == "1"
 BASE_MODEL = os.environ.get("BASE_MODEL", "openai/whisper-small")
@@ -63,10 +60,6 @@ DROPOUT = float(os.environ.get("DROPOUT", 0.1))
 LR = float(os.environ.get("LR", 1e-5))
 
 
-# --------------------------------------------------------------------------- #
-# Normalised WER  (lower-case, strip punctuation, collapse whitespace)
-# --------------------------------------------------------------------------- #
-
 _PUNCT = re.compile(r"[^\w\s]", flags=re.UNICODE)
 
 
@@ -76,10 +69,6 @@ def norm_text(s):
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-
-# --------------------------------------------------------------------------- #
-# Data
-# --------------------------------------------------------------------------- #
 
 def load_our_rows(csv_path):
     rows = []
@@ -129,8 +118,6 @@ def load_extra_train():
                   f"        (commonvoice needs `huggingface-cli login` + accepting its terms)")
     return out
 
-
-# --------------------------------------------------------------------------- #
 
 def auto_batch(model_name):
     n = model_name.lower()
@@ -198,7 +185,7 @@ def main():
         wer_raw = 100 * metric.compute(predictions=pred_str, references=label_str)
 
         pairs = [(norm_text(p), norm_text(l)) for p, l in zip(pred_str, label_str)]
-        pairs = [(p, l) for p, l in pairs if l]          # jiwer errors on empty refs
+        pairs = [(p, l) for p, l in pairs if l]
         wer_norm = 100 * metric.compute(
             predictions=[p for p, _ in pairs], references=[l for _, l in pairs]
         )
@@ -259,7 +246,6 @@ def main():
     if resume:
         print(f"\n=== resuming from last checkpoint in {OUTPUT_DIR} ===")
     else:
-        # baseline: the un-tuned model, same normalised metric
         print("\n=== baseline eval (before fine-tuning) ===")
         print(trainer.evaluate())
 
