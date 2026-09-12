@@ -24,6 +24,7 @@ BASE_MODEL = os.environ.get("BASE_MODEL", "openai/whisper-small")
 LANGUAGE = "macedonian"
 TASK = "transcribe"
 INCLUDE_SILVER = os.environ.get("INCLUDE_SILVER") == "1"
+USE_VERIFIED = os.environ.get("USE_VERIFIED", "1" if (DATA_DIR / "metadata_verified.csv").exists() else "0") == "1"
 EXTRA_DATA = [s.strip().lower() for s in os.environ.get("EXTRA_DATA", "fleurs").split(",") if s.strip()]
 MAX_STEPS = int(os.environ.get("MAX_STEPS", 1000))
 DROPOUT = float(os.environ.get("DROPOUT", 0.1))
@@ -53,7 +54,10 @@ def load_our_rows(csv_path):
 
 
 def our_datasets():
-    rows = load_our_rows(DATA_DIR / "metadata.csv")
+    verified_path = DATA_DIR / "metadata_verified.csv"
+    gold_path = verified_path if USE_VERIFIED and verified_path.exists() else DATA_DIR / "metadata.csv"
+    print(f"gold source: {gold_path.name}")
+    rows = load_our_rows(gold_path)
     if INCLUDE_SILVER and (DATA_DIR / "metadata_silver.csv").exists():
         rows += load_our_rows(DATA_DIR / "metadata_silver.csv")
     train = [{"audio": r["audio"], "sentence": r["sentence"]} for r in rows if r["split"] != "test"]
