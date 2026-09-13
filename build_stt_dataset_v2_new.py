@@ -7,6 +7,7 @@ import re
 import hashlib
 import os
 import sys
+import multiprocessing as mp
 
 from rapidfuzz import fuzz
 
@@ -53,6 +54,19 @@ TEST_EVERY = 10
 MAX_VIDEOS_TO_PROCESS = None
 if os.environ.get("MAX_VIDEOS"):
     MAX_VIDEOS_TO_PROCESS = int(os.environ["MAX_VIDEOS"])
+
+# Колку видеа да се обработуваат ИСТОВРЕМЕНО (одделни процеси, секој со свој
+# Whisper + PaddleOCR модел вчитан во меморија). NUM_WORKERS=1 (default) е
+# истото однесување како порано - секвенцијално, едно по едно видео.
+# Секој worker троши целосна копија од моделите во RAM, па не претерувај:
+# large-v3 е ~3 GB по процес, plus PaddleOCR. 2-3 workers е разумен старт на
+# машина со 16GB+ RAM; на CPU не помага да пуштиш повеќе workers од јадра.
+NUM_WORKERS = int(os.environ.get("NUM_WORKERS", "1"))
+
+# Колку CPU threads смее да користи секој Whisper модел. По default се дели
+# автоматски (вкупно јадра / NUM_WORKERS) за да не се преклопуваат workers-ите.
+_WHISPER_CPU_THREADS_ENV = os.environ.get("WHISPER_CPU_THREADS")
+WHISPER_CPU_THREADS = int(_WHISPER_CPU_THREADS_ENV) if _WHISPER_CPU_THREADS_ENV else None
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
 
@@ -215,9 +229,11 @@ def get_whisper_model():
     global _WHISPER_MODEL_OBJ
     if _WHISPER_MODEL_OBJ is None:
         from faster_whisper import WhisperModel
-        print(f"Loading Whisper model '{WHISPER_MODEL}' ({WHISPER_COMPUTE_TYPE}) ...")
+        threads = WHISPER_CPU_THREADS or max(1, (os.cpu_count() or 4) // max(1, NUM_WORKERS))
+        print(f"Loading Whisper model '{WHISPER_MODEL}' ({WHISPER_COMPUTE_TYPE}, cpu_threads={threads}) ...")
         _WHISPER_MODEL_OBJ = WhisperModel(
-            WHISPER_MODEL, device=WHISPER_DEVICE, compute_type=WHISPER_COMPUTE_TYPE
+            WHISPER_MODEL, device=WHISPER_DEVICE, compute_type=WHISPER_COMPUTE_TYPE,
+            cpu_threads=threads,
         )
     return _WHISPER_MODEL_OBJ
 
@@ -279,6 +295,7 @@ def get_ocr():
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
             use_textline_orientation=False,
+            enable_mkldnn=False,
         )
         try:
             _OCR_OBJ = PaddleOCR(**common)
@@ -418,6 +435,28 @@ def process_video(video_path):
     return rows
 
 
+def process_video_worker(video_path):
+    """Wrapper за multiprocessing: обработува ЕДНО видео во посебен процес и
+    никогаш не крена исклучок кон родителот - секоја грешка се враќа како
+    порака за да продолжат другите видеа. Мора да е top-level функција
+    (picklable) за да работи со multiprocessing spawn (Windows/macOS)."""
+    try:
+        rows = process_video(video_path)
+        return video_path.name, rows, None
+    except Exception as e:
+        return video_path.name, [], str(e)
+
+
+def _failed_row(video_name, error):
+    return {
+        "video": video_name, "source": "rejected",
+        "reject_reason": f"processing failed: {error}",
+        "start": "", "end": "", "duration": "", "text": "",
+        "avg_logprob": "", "no_speech_prob": "", "ocr_text": "",
+        "ocr_score": "", "file_name": "",
+    }
+
+
 def split_for_video(video_name):
     h = int(hashlib.md5(video_name.encode()).hexdigest(), 16)
     return "test" if h % TEST_EVERY == 0 else "train"
@@ -447,22 +486,37 @@ def main():
         return
 
     all_rows = []
-    for idx, video_path in enumerate(videos, 1):
-        print(f"\n[{idx}/{len(videos)}] {video_path.name}")
-        try:
-            all_rows.extend(process_video(video_path))
-        except KeyboardInterrupt:
-            print("Interrupted by user - writing what we have so far.")
-            break
-        except Exception as e:
-            print("  FAILED:", e)
-            all_rows.append({
-                "video": video_path.name, "source": "rejected",
-                "reject_reason": f"processing failed: {e}",
-                "start": "", "end": "", "duration": "", "text": "",
-                "avg_logprob": "", "no_speech_prob": "", "ocr_text": "",
-                "ocr_score": "", "file_name": "",
-            })
+
+    if NUM_WORKERS > 1 and len(videos) > 1:
+        print(f"Processing {len(videos)} videos with {NUM_WORKERS} parallel workers "
+              f"(секој worker вчитува свои Whisper+OCR модели во RAM - следи ја меморијата)")
+        ctx = mp.get_context("spawn")
+        done = 0
+        with ctx.Pool(processes=NUM_WORKERS) as pool:
+            try:
+                for name, rows, err in pool.imap_unordered(process_video_worker, videos):
+                    done += 1
+                    if err:
+                        print(f"\n[{done}/{len(videos)}] {name}  FAILED: {err}")
+                        all_rows.append(_failed_row(name, err))
+                    else:
+                        print(f"\n[{done}/{len(videos)}] {name}  done")
+                        all_rows.extend(rows)
+            except KeyboardInterrupt:
+                print("Interrupted by user - terminating workers, writing what we have so far.")
+                pool.terminate()
+                pool.join()
+    else:
+        for idx, video_path in enumerate(videos, 1):
+            print(f"\n[{idx}/{len(videos)}] {video_path.name}")
+            try:
+                all_rows.extend(process_video(video_path))
+            except KeyboardInterrupt:
+                print("Interrupted by user - writing what we have so far.")
+                break
+            except Exception as e:
+                print("  FAILED:", e)
+                all_rows.append(_failed_row(video_path.name, e))
 
     for r in all_rows:
         r["split"] = split_for_video(r.get("video", "")) if r.get("source") in ("gold", "silver") else ""

@@ -108,3 +108,30 @@ and only redoes the scoring + clip cutting).
 
 To add more clean data, mix in Google **FLEURS** `mk_mk` and Mozilla
 **Common Voice** `mk` (both already have verified transcripts).
+
+---
+
+## 6. Обработка на повеќе видеа истовремено (паралелно)
+
+По default пайплајнот минува низ видеата едно по едно. Ако имаш повеќе
+слободни CPU јадра, `NUM_WORKERS` пушта повеќе видеа паралелно, секое во
+свој процес (со свој Whisper + PaddleOCR модел вчитан во RAM):
+
+```bash
+NUM_WORKERS=3 .venv/bin/python build_stt_dataset_v2_new.py
+```
+
+Внимавај:
+- **RAM е ограничувачки фактор, не CPU.** `large-v3` е ~3 GB по процес +
+  PaddleOCR. 3 workers ≈ 10-12 GB само за модели. Ако машината почне да
+  swap-ува, намали `NUM_WORKERS`.
+- CPU threads по Whisper модел автоматски се делат (вкупно јадра /
+  `NUM_WORKERS`), за да не се тепаат workers-ите за истите јадра. Може рачно
+  да се override-ира со `WHISPER_CPU_THREADS`.
+- Кешот (`_temp_v2_new/`) работи исто како и порано - секое видео си има
+  своја папка, нема конфликт меѓу workers.
+- За брз тест на паралелизмот со мал модел:
+  ```bash
+  WHISPER_MODEL=small NUM_WORKERS=2 MAX_VIDEOS=6 .venv/bin/python build_stt_dataset_v2_new.py
+  ```
+- `NUM_WORKERS=1` (default) е точно старото секвенцијално однесување.

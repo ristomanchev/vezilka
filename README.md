@@ -122,6 +122,7 @@ python3.11 -m venv .venv
 # 4. (по избор) регенерирај го датасетот — треба и видеата во downloads/ + baba_ruza/
 .venv/bin/python build_stt_dataset_v2_new.py                 # симнува large-v3 (~3 GB), трае часови на CPU
 WHISPER_MODEL=small MAX_VIDEOS=2 .venv/bin/python build_stt_dataset_v2_new.py   # брз тест
+NUM_WORKERS=3 .venv/bin/python build_stt_dataset_v2_new.py    # паралелно, повеќе видеа одеднаш (види HOWTO.md §6)
 
 # 5. fine-tune
 .venv/bin/pip install "transformers>=4.44" "datasets>=2.20" accelerate evaluate jiwer torch soundfile librosa tensorboard
