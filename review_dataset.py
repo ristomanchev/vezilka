@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-DATA = ROOT / "dataset_v2_new"
+DATA = ROOT / "dataset_raw"
 PROGRESS_FILE = DATA / "review_progress.csv"
 FIELDS = ["file_name", "source", "original_text", "text", "status", "reviewed_at"]
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import build_stt_dataset_v2_new as b
+import build_dataset as b
 
 
 def test_normalize_strips_emoji_and_hashtags_and_urls():

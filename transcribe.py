@@ -6,15 +6,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 
+DATASETS = [
+    (ROOT / "dataset" / "metadata.csv", "corrected_text", "was_edited"),
+    (ROOT / "dataset_raw" / "metadata_full.csv", "text", "source"),
+]
+
+
 def dataset_label(path):
-    full = ROOT / "dataset_v2_new" / "metadata_full.csv"
-    if not full.exists():
-        return None
     name = Path(path).name
-    with open(full, encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            if r["file_name"].endswith(name):
-                return r["text"], r["source"]
+    for csv_path, text_col, tag_col in DATASETS:
+        if not csv_path.exists():
+            continue
+        with open(csv_path, encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                if r["file_name"].endswith(name):
+                    tag = f"{tag_col}={r[tag_col]}" if r.get(tag_col) else csv_path.parent.name
+                    return r.get(text_col, ""), tag
     return None
 
 
